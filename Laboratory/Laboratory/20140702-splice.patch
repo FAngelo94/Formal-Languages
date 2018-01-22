@@ -1,0 +1,121 @@
+diff -Naur ./acse_1.1.0/acse/Acse.lex ./acse_1.1.0_splice/acse/Acse.lex
+--- ./acse_1.1.0/acse/Acse.lex	2008-11-21 12:47:02.000000000 +0100
++++ ./acse_1.1.0_splice/acse/Acse.lex	2014-06-28 18:52:19.729641066 +0200
+@@ -88,6 +88,10 @@
+ "&&"              { return ANDAND; }
+ "||"              { return OROR; }
+ ","               { return COMMA; }
++"$" 							{ return DOLLAR; }
++"@"								{ return AT; }
++
++
+ 
+ "do"              { return DO; }
+ "else"            { return ELSE; }
+diff -Naur ./acse_1.1.0/acse/Acse.y ./acse_1.1.0_splice/acse/Acse.y
+--- ./acse_1.1.0/acse/Acse.y	2008-12-23 17:02:28.000000000 +0100
++++ ./acse_1.1.0_splice/acse/Acse.y	2014-06-29 11:56:25.899791767 +0200
+@@ -123,6 +123,9 @@
+ %token READ
+ %token WRITE
+ 
++%token <label> DOLLAR
++%token <label> AT
++
+ %token <label> DO
+ %token <while_stmt> WHILE
+ %token <label> IF
+@@ -131,6 +134,8 @@
+ %token <svalue> IDENTIFIER
+ %token <intval> NUMBER
+ 
++
++
+ %type <expr> exp
+ %type <decl> declaration
+ %type <list> declaration_list
+@@ -148,6 +153,7 @@
+ %left AND_OP
+ %left EQ NOTEQ
+ %left LT GT LTEQ GTEQ
++%left DOLLAR AT
+ %left SHL_OP SHR_OP
+ %left MINUS PLUS
+ %left MUL_OP DIV_OP
+@@ -567,6 +573,52 @@
+                                  (program, exp_r0, $2, SUB);
+                         }
+                      }
++		| exp DOLLAR exp AT exp {
++				int e_c;
++
++				if ($5.expression_type != IMMEDIATE)
++					yyerror();
++
++				if ($5.value < 0)
++					yyerror();
++
++				if ($5.value>32)
++					e_c = 0;
++				else 
++					e_c = 32-$5.value;
++
++				int r_e2 = gen_load_immediate(program, 0);
++				int r_index = gen_load_immediate(program, e_c);
++
++				$4 = newLabel(program); /*label end*/
++				$2 = assignNewLabel(program); /*label condition*/
++
++				gen_beq_instruction(program, $4, 0);			
++				gen_shli_instruction(program, r_e2, r_e2, 1);
++				gen_addi_instruction(program, r_e2, r_e2, 1);
++				gen_subi_instruction(program, r_index, r_index, 1);		
++				gen_bt_instruction(program, $2, 0);	
++				assignLabel(program, $4);
++				
++				int r_e1 = getNewRegister(program); 				
++				gen_notb_instruction(program, r_e1, r_e2); /*define mask for e1 through*/
++
++				/*get e1 bits of e1*/
++				if ($1.expression_type == IMMEDIATE)
++						gen_andb_instruction(program, r_e1, r_e1, gen_load_immediate(program, $1.value), CG_DIRECT_ALL);
++				else
++					gen_andb_instruction(program, r_e1, r_e1, $1.value, CG_DIRECT_ALL);
++
++				/*get 32-e1 bits of e2*/
++				if ($3.expression_type == IMMEDIATE)
++						gen_andb_instruction(program, r_e2, r_e2, gen_load_immediate(program, $3.value), CG_DIRECT_ALL);
++				else
++				gen_andb_instruction(program, r_e2, r_e2, $3.value, CG_DIRECT_ALL);
++				
++				int r = getNewRegister(program);
++				gen_orb_instruction(program, r, r_e1, r_e2, CG_DIRECT_ALL);
++				$$ = create_expression(r, REGISTER);
++		} 
+ ;
+ 
+ %%
+diff -Naur ./acse_1.1.0/tests/splice/splicec.src ./acse_1.1.0_splice/tests/splice/splicec.src
+--- ./acse_1.1.0/tests/splice/splicec.src	1970-01-01 01:00:00.000000000 +0100
++++ ./acse_1.1.0_splice/tests/splice/splicec.src	2014-06-29 10:36:58.629790296 +0200
+@@ -0,0 +1,8 @@
++int a,splice;
++
++read(a);
++
++
++splice = a $ 43690 @ 16;
++
++write(splice);
+diff -Naur ./acse_1.1.0/tests/splice/splice.src ./acse_1.1.0_splice/tests/splice/splice.src
+--- ./acse_1.1.0/tests/splice/splice.src	1970-01-01 01:00:00.000000000 +0100
++++ ./acse_1.1.0_splice/tests/splice/splice.src	2014-06-29 11:36:49.582288097 +0200
+@@ -0,0 +1,8 @@
++int a,b,splice;
++
++read(a);
++read(b);
++
++splice = a $ b @ 16;
++
++write(splice);

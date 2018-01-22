@@ -1,0 +1,133 @@
+diff --git a/acse/Acse.lex b/acse/Acse.lex
+index f4ad42a..46ede78 100644
+--- a/acse/Acse.lex
++++ b/acse/Acse.lex
+@@ -98,6 +98,9 @@ ID       [a-zA-Z_][a-zA-Z0-9_]*
+ "return"          { return RETURN; }
+ "read"            { return READ; }
+ "write"           { return WRITE; }
++"permutate"       { return PERMUTATE; }
++"q["              { return LXSQ; }
++"]p"              { return RXSQ; }
+ 
+ {ID}              { yylval.svalue=strdup(yytext); return IDENTIFIER; }
+ {DIGIT}+          { yylval.intval = atoi( yytext );
+diff --git a/acse/Acse.y b/acse/Acse.y
+index 7029c8b..af52397 100644
+--- a/acse/Acse.y
++++ b/acse/Acse.y
+@@ -16,6 +16,7 @@
+ 
+ #include <stdio.h>       
+ #include <stdlib.h>
++#include <stdint.h>
+ #include <assert.h>
+ #include <malloc.h>
+ #include "axe_struct.h"
+@@ -122,6 +123,7 @@ t_io_infos *file_infos;    /* input and output files used by the compiler */
+ %token RETURN
+ %token READ
+ %token WRITE
++%token PERMUTATE LXSQ RXSQ
+ 
+ %token <label> DO
+ %token <while_stmt> WHILE
+@@ -135,6 +137,7 @@ t_io_infos *file_infos;    /* input and output files used by the compiler */
+ %type <decl> declaration
+ %type <list> declaration_list
+ %type <label> if_stmt
++%type <list> cst_list
+ 
+ /*=========================================================================
+                           OPERATOR PRECEDENCES
+@@ -251,8 +254,54 @@ control_statement : if_statement         { /* does nothing */ }
+             | while_statement            { /* does nothing */ }
+             | do_while_statement SEMI    { /* does nothing */ }
+             | return_statement SEMI      { /* does nothing */ }
++            | permutate_statement SEMI   { /* does nothing */ }
+ ;
+ 
++cst_list : NUMBER { $$ = addFirst(NULL, (void*)(intptr_t)$1); }
++         | NUMBER COMMA cst_list { $$ = addFirst($3, (void*)(intptr_t)$1); }
++         ;
++
++permutate_statement : PERMUTATE LPAR IDENTIFIER COMMA LXSQ cst_list RXSQ RPAR
++    {
++      t_axe_variable *arr = getVariable(program, $3);
++      if (!arr || !arr->isArray) {
++        fprintf(stderr, "Permutate works only on array!");
++        exit(-1);
++      }
++
++      t_list *cst_list = $6;
++      int len = getLength(cst_list);
++      t_list *regs = NULL;
++
++      for (t_list *cur = cst_list; cur != 0; cur = LNEXT(cur)) {
++        int cst_idx = (int)(intptr_t)LDATA(cur);
++        if (cst_idx >= arr->arraySize) {
++          fprintf(stderr, "Illegal permutation index!");
++          exit(-1);
++        }
++        t_axe_expression idx = create_expression(cst_idx, IMMEDIATE);
++        int tmp = loadArrayElement(program, $3, idx);
++        regs = addLast(regs, (void*)(intptr_t)(tmp));
++      }
++
++      /* Rotate left by 1 of cst_list */
++      cst_list = removeFirst(addLast(cst_list, LDATA(cst_list)));
++
++      for (t_list *cur = cst_list, *cur_reg = regs;
++           cur != 0; cur = LNEXT(cur), cur_reg = LNEXT(cur_reg)) {
++        int cst_idx = (int)(intptr_t)LDATA(cur);
++        int reg = (int)(intptr_t)LDATA(cur_reg);
++        t_axe_expression idx = create_expression(cst_idx, IMMEDIATE);
++        t_axe_expression val = create_expression(reg, REGISTER);
++        storeArrayElement(program, $3, idx, val);
++      }
++
++      free(regs);
++      free(cst_list);
++      free($3);
++    }
++                    ;
++
+ read_write_statement : read_statement  { /* does nothing */ }
+                      | write_statement { /* does nothing */ }
+ ;
+diff --git a/tests/Makefile b/tests/Makefile
+index a3aed3b..8385057 100644
+--- a/tests/Makefile
++++ b/tests/Makefile
+@@ -1,7 +1,7 @@
+ asm=$(CURDIR)/../bin/asm
+ acse=$(CURDIR)/../bin/acse
+ export asm acse
+-dirs:=arrays sum dowhile fact mult_table power semi assign arrays arrays2 misc
++dirs:=arrays sum dowhile fact mult_table power semi assign arrays arrays2 misc permutate
+ 
+ test :
+ 	for i in $(dirs); do $(MAKE) -C $$i -f ../Makefile.test ; done
+diff --git a/tests/permutate/perm.src b/tests/permutate/perm.src
+new file mode 100644
+index 0000000..8316d10
+--- /dev/null
++++ b/tests/permutate/perm.src
+@@ -0,0 +1,17 @@
++int arr[6];
++
++arr[0] = 10;
++arr[1] = 11;
++arr[2] = 12;
++arr[3] = 13;
++arr[4] = 14;
++arr[5] = 15;
++
++permutate(arr, q[ 4, 2, 0 ]p);
++
++write(arr[0]);
++write(arr[1]);
++write(arr[2]);
++write(arr[3]);
++write(arr[4]);
++write(arr[5]);

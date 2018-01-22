@@ -1,0 +1,261 @@
+diff -uNr acse_1.1.0/acse/Acse.y acse_1.1.0-matrix/acse/Acse.y
+--- acse_1.1.0/acse/Acse.y	2008-12-23 17:02:28.000000000 +0100
++++ acse_1.1.0-matrix/acse/Acse.y	2013-02-18 12:08:56.474963369 +0100
+@@ -217,6 +217,15 @@
+                if ($$ == NULL)
+                   notifyError(AXE_OUT_OF_MEMORY);
+             }
++            | IDENTIFIER LSQUARE NUMBER COMMA NUMBER RSQUARE
++            {
++               /* create a new instance of t_axe_declaration */
++               $$ = alloc_declaration_matrix($1, $3, $5);
++
++                  /* test if an `out of memory' occurred */
++               if ($$ == NULL)
++                  notifyError(AXE_OUT_OF_MEMORY);
++            }
+             | IDENTIFIER
+             {
+                /* create a new instance of t_axe_declaration */
+@@ -274,6 +283,15 @@
+                 * by a call to the function `strdup' (see Acse.lex) */
+                free($1);
+             }
++            | IDENTIFIER LSQUARE exp COMMA exp RSQUARE ASSIGN exp
++            {
++               t_axe_expression linearIndex = 
++                 matrixLinearIndex(program, $1, $3, $5);
++
++               storeArrayElement(program, $1, linearIndex, $8);
++
++               free($1);
++            }
+             | IDENTIFIER ASSIGN exp
+             {
+                int location;
+@@ -477,6 +495,22 @@
+ 
+                      /* create a new expression */
+                      $$ = create_expression (reg, REGISTER);
++
++                     /* free the memory associated with the IDENTIFIER */
++                     free($1);
++   }
++   | IDENTIFIER LSQUARE exp COMMA exp RSQUARE {
++                     int reg;
++                     
++                     t_axe_expression linearIndex = 
++                       matrixLinearIndex(program, $1, $3, $5);
++
++                     /* load the value IDENTIFIER[exp]
++                      * into `arrayElement' */
++                     reg = loadArrayElement(program, $1, linearIndex);
++
++                     /* create a new expression */
++                     $$ = create_expression (reg, REGISTER);
+ 
+                      /* free the memory associated with the IDENTIFIER */
+                      free($1);
+diff -uNr acse_1.1.0/acse/axe_array.c acse_1.1.0-matrix/acse/axe_array.c
+--- acse_1.1.0/acse/axe_array.c	2008-12-14 22:40:00.000000000 +0100
++++ acse_1.1.0-matrix/acse/axe_array.c	2013-02-18 12:15:21.291631962 +0100
+@@ -12,6 +12,7 @@
+ #include "symbol_table.h"
+ #include "axe_utils.h"
+ #include "axe_errors.h"
++#include "axe_expressions.h"
+ 
+ void storeArrayElement(t_program_infos *program, char *ID
+             , t_axe_expression index, t_axe_expression data)
+@@ -107,3 +108,20 @@
+     * the value of the array slot */
+    return mova_register;
+ }
++
++
++t_axe_expression matrixLinearIndex(t_program_infos *program, char *ID, 
++                                   t_axe_expression row, 
++                                   t_axe_expression col) {
++  t_axe_variable *var = getVariable(program, ID);
++  if (!var->isMatrix)
++    notifyError(AXE_INVALID_TYPE);
++
++  t_axe_expression fact = create_expression(var->rows, IMMEDIATE);
++
++  t_axe_expression li =
++    handle_bin_numeric_op(program, col, fact, MUL);
++  li = handle_bin_numeric_op(program, row, li, ADD);
++
++  return li;
++}
+diff -uNr acse_1.1.0/acse/axe_array.h acse_1.1.0-matrix/acse/axe_array.h
+--- acse_1.1.0/acse/axe_array.h	2008-11-21 12:47:02.000000000 +0100
++++ acse_1.1.0-matrix/acse/axe_array.h	2013-02-18 12:07:26.994962918 +0100
+@@ -48,4 +48,6 @@
+ extern void storeArrayElement(t_program_infos *program, char *ID
+             , t_axe_expression index, t_axe_expression data);
+ 
++extern t_axe_expression matrixLinearIndex(t_program_infos *program,
++            char *ID, t_axe_expression row, t_axe_expression col);
+ #endif
+diff -uNr acse_1.1.0/acse/axe_engine.c acse_1.1.0-matrix/acse/axe_engine.c
+--- acse_1.1.0/acse/axe_engine.c	2008-12-15 17:44:34.000000000 +0100
++++ acse_1.1.0-matrix/acse/axe_engine.c	2013-02-18 11:35:42.188286708 +0100
+@@ -67,6 +67,21 @@
+    addVariable(program, var);
+ }
+ 
++void createVariableMatrix(t_program_infos *program, char *ID, int type,
++                          int rows, int cols) {
++  /* test the preconditions */
++  if (program == NULL)
++    notifyError(AXE_PROGRAM_NOT_INITIALIZED);
++
++  t_axe_variable *var = alloc_variable_matrix(ID, type, rows, cols);
++  if (var == NULL)
++    notifyError(AXE_OUT_OF_MEMORY);
++
++  var->labelID = newLabel(program);
++
++  addVariable(program, var);
++}
++
+ /* translate each instruction in his assembler symbolic representation */
+ void translateCodeSegment(t_program_infos *program, FILE *fp)
+ {
+diff -uNr acse_1.1.0/acse/axe_engine.h acse_1.1.0-matrix/acse/axe_engine.h
+--- acse_1.1.0/acse/axe_engine.h	2008-12-15 17:44:34.000000000 +0100
++++ acse_1.1.0-matrix/acse/axe_engine.h	2013-02-18 11:17:38.411614611 +0100
+@@ -52,6 +52,9 @@
+ extern void createVariable(t_program_infos *program
+       , char *ID, int type, int isArray, int arraySize, int init_val);
+ 
++extern void createVariableiMatrix(t_program_infos *program
++      , char *ID, int type, int rows, int cols);
++
+ /* get a previously allocated variable */
+ extern t_axe_variable * getVariable
+       (t_program_infos *program, char *ID);
+diff -uNr acse_1.1.0/acse/axe_struct.c acse_1.1.0-matrix/acse/axe_struct.c
+--- acse_1.1.0/acse/axe_struct.c	2008-11-21 12:47:02.000000000 +0100
++++ acse_1.1.0-matrix/acse/axe_struct.c	2013-02-18 11:11:42.228279493 +0100
+@@ -133,11 +133,28 @@
+    result->arraySize = arraySize;
+    result->ID = ID;
+    result->init_val = init_val;
++   result->isMatrix = 0;
+ 
+    /* return the just created and initialized instance of t_axe_declaration */
+    return result;
+ }
+ 
++
++t_axe_declaration * alloc_declaration_matrix
++      (char *ID, int rows, int cols)
++{
++  t_axe_declaration *result = alloc_declaration(ID, 1, rows * cols, 0);
++
++  if (result == NULL)
++    return NULL;
++
++  result->isMatrix = 1;
++  result->cols = cols;
++  result->rows = rows;
++
++  return result;
++}
++
+ /* finalize an instance of `t_axe_variable' */
+ void free_variable (t_axe_variable *variable)
+ {
+@@ -165,11 +182,27 @@
+    result->ID = ID;
+    result->init_val = init_val;
+    result->labelID = NULL;
++   result->isMatrix = 0;
+ 
+    /* return the just created and initialized instance of t_axe_variable */
+    return result;
+ }
+ 
++t_axe_variable * alloc_variable_matrix
++      (char *ID, int type, int rows, int cols)
++{
++  t_axe_variable *result = alloc_variable(ID, type, 1, rows * cols, 0);
++
++  if (result == NULL)
++    return NULL;
++
++  result->isMatrix = 1;
++  result->cols = cols;
++  result->rows = rows;
++
++  return result;
++}
++
+ /* finalize an instruction info. */
+ void free_Instruction(t_axe_instruction *inst)
+ {
+diff -uNr acse_1.1.0/acse/axe_struct.h acse_1.1.0-matrix/acse/axe_struct.h
+--- acse_1.1.0/acse/axe_struct.h	2008-11-21 12:47:02.000000000 +0100
++++ acse_1.1.0-matrix/acse/axe_struct.h	2013-02-18 11:33:11.394952621 +0100
+@@ -57,6 +57,9 @@
+                             * pointer or an empty string "") */
+    t_axe_label *labelID;   /* a label that refers to the location
+                             * of the variable inside the data segment */
++   int isMatrix;
++   int cols;
++   int rows;
+ } t_axe_variable;
+ 
+ /* a simbolic assembly instruction */
+@@ -104,6 +107,9 @@
+    int init_val;          /* initial value of the current variable. */
+    char *ID;              /* variable identifier (should never be a NULL pointer
+                            * or an empty string "") */
++   int isMatrix;
++   int cols;
++   int rows;
+ } t_axe_declaration;
+ 
+ typedef struct t_while_statement
+@@ -139,6 +145,9 @@
+ extern t_axe_variable * alloc_variable
+       (char *ID, int type, int isArray, int arraySize, int init_val);
+ 
++extern t_axe_variable * alloc_variable_matrix
++      (char *ID, int type, int rows, int cols);
++
+ /* finalize an instance of `t_axe_variable' */
+ extern void free_variable (t_axe_variable *variable);
+ 
+@@ -146,6 +155,9 @@
+ extern t_axe_declaration * alloc_declaration
+       (char *ID, int isArray, int arraySize, int init_val);
+ 
++extern t_axe_declaration * alloc_declaration_matrix
++      (char *ID, int rows, int cols);
++
+ /* finalize an instruction info. */
+ extern void free_Instruction(t_axe_instruction *inst);
+ 
+diff -uNr acse_1.1.0/acse/axe_utils.c acse_1.1.0-matrix/acse/axe_utils.c
+--- acse_1.1.0/acse/axe_utils.c	2008-12-14 22:40:00.000000000 +0100
++++ acse_1.1.0-matrix/acse/axe_utils.c	2013-02-18 11:41:17.114955053 +0100
+@@ -75,10 +75,15 @@
+          notifyError(AXE_NULL_DECLARATION);
+       }
+ 
++      if (current_decl->isMatrix) {
++        createVariableMatrix(program, current_decl->ID, varType, 
++                             current_decl->rows, current_decl->cols);
++      } else {
++
+       /* create and assign a new variable to program */
+       createVariable(program, current_decl->ID, varType, current_decl->isArray
+             , current_decl->arraySize, current_decl->init_val);
+-
++      }
+       /* update the value of `current_element' */
+       current_element = LNEXT(current_element);
+    }

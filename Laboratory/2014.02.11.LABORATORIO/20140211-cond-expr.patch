@@ -1,0 +1,66 @@
+diff --git a/acse/Acse.y b/acse/Acse.y
+index 7029c8b..d09cd0a 100644
+--- a/acse/Acse.y
++++ b/acse/Acse.y
+@@ -142,6 +142,7 @@ t_io_infos *file_infos;    /* input and output files used by the compiler */
+ 
+ %left COMMA
+ %left ASSIGN
++%left IF ELSE
+ %left OROR
+ %left ANDAND
+ %left OR_OP
+@@ -567,6 +568,25 @@ exp: NUMBER      { $$ = create_expression ($1, IMMEDIATE); }
+                                  (program, exp_r0, $2, SUB);
+                         }
+                      }
++
++  | exp IF exp ELSE exp
++    {
++      if ($3.expression_type == IMMEDIATE) {
++        $$ = $3.value ? $1 : $5;
++      } else {
++        t_axe_expression zero = create_expression(0, IMMEDIATE);
++        t_axe_expression cmp = handle_binary_comparison(program, $3, zero, _EQ_);
++        t_axe_expression one = create_expression(1, IMMEDIATE);
++        t_axe_expression mask = handle_bin_numeric_op(program, cmp, one, SUB);
++        int r = getNewRegister(program);
++        gen_notb_instruction(program, r, mask.value);
++        t_axe_expression nmask = create_expression(r, REGISTER);
++        $$ = handle_bin_numeric_op(program,
++                                   handle_bin_numeric_op(program, $1, mask, ANDB),
++                                   handle_bin_numeric_op(program, $5, nmask, ANDB),
++                                   ORB);
++      }
++    }
+ ;
+ 
+ %%
+diff --git a/tests/Makefile b/tests/Makefile
+index a3aed3b..92ca9ca 100644
+--- a/tests/Makefile
++++ b/tests/Makefile
+@@ -1,7 +1,7 @@
+ asm=$(CURDIR)/../bin/asm
+ acse=$(CURDIR)/../bin/acse
+ export asm acse
+-dirs:=arrays sum dowhile fact mult_table power semi assign arrays arrays2 misc
++dirs:=arrays sum dowhile fact mult_table power semi assign arrays arrays2 misc cond-expr
+ 
+ test :
+ 	for i in $(dirs); do $(MAKE) -C $$i -f ../Makefile.test ; done
+diff --git a/tests/cond-expr/cond-expr.src b/tests/cond-expr/cond-expr.src
+index e69de29..2ffdc6b 100644
+--- a/tests/cond-expr/cond-expr.src
++++ b/tests/cond-expr/cond-expr.src
+@@ -0,0 +1,10 @@
++int a;
++int b;
++int c;
++
++read(a);
++read(b);
++read(c);
++write(a if b > 0 else c);
++
++write(a if b else c if b if c else b < 2 else -100);
